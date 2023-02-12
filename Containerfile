@@ -32,7 +32,7 @@ COPY --from=builder /zfs/*.rpm /zfs/
 RUN rpm-ostree install /zfs/*.$(uname -p).rpm && \
     # we don't want any files on /var
     rm -rf /var/lib/pcp && \
-    rpm-ostree install firewalld && \
+    rpm-ostree install firewalld distrobox && \
     curl -o /etc/yum.repos.d/tailscale.repo -LO https://pkgs.tailscale.com/stable/fedora/tailscale.repo && \
     sed -i 's/repo_gpgcheck=1/repo_gpgcheck=0/g' /etc/yum.repos.d/tailscale.repo && \
     rpm-ostree install tailscale && \
