@@ -1,0 +1,91 @@
+name: "Build image: coreos-vlm"
+
+env:
+  MAJOR_VERSION: 39
+  IMAGE_NAME: "coreos-vlm"
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Containerfile
+      - .github/workflows/main.yml
+  schedule:
+    - cron: '0 15 * * *'  # 3pm UTC everyday (timed against official fedora container pushes)
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Generate tags
+        id: generate_tags
+        run: |
+          TIMESTAMP="$(date +%Y%m%d)"
+          TAGS=("${MAJOR_VERSION}" "${MAJOR_VERSION}-${TIMESTAMP}")
+          echo "tags=${TAGS[*]}" >> $GITHUB_OUTPUT
+
+
+      - name: Image metadata
+        uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: |
+            ${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.version=${{ env.MAJOR_VERSION }}
+
+
+      - name: Build container image
+        uses: redhat-actions/buildah-build@v2
+        id: build_image
+        with:
+          tags: ${{ steps.generate_tags.outputs.tags }}
+          containerfiles: Containerfile
+          image: ${{ env.IMAGE_NAME }}
+          layers: false
+          labels: ${{ steps.meta.outputs.labels }}
+          oci: true
+
+      - name: Push To GHCR
+        uses: redhat-actions/push-to-registry@v2
+        id: push
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+        with:
+          image: ${{ steps.build_image.outputs.image }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+          tags: ${{ steps.build_image.outputs.tags }}
+          extra-args: |
+            --disable-content-trust
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.4.0
+
+      - name: Sign container image
+        run: |
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}@${TAGS}
+        env:
+          TAGS: ${{ steps.push.outputs.digest }}
+          COSIGN_EXPERIMENTAL: false
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+
+      - name: Echo outputs
+        run: |
+          echo "${{ toJSON(steps.push.outputs) }}"
+

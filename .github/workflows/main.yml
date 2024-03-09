@@ -1,0 +1,52 @@
+name: "Build image: coreos-vlm"
+
+env:
+  MAJOR_VERSION: 39
+  IMAGE_NAME: "coreos-vlm"
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 15 * * *'  # 3pm UTC everyday (timed against official fedora container pushes)
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Generate tags
+        id: generate_tags
+        run: |
+          TIMESTAMP="$(date +%Y%m%d)"
+          TAGS=("${MAJOR_VERSION}" "${MAJOR_VERSION}-${TIMESTAMP}")
+          echo "tags=${TAGS[*]}" >> $GITHUB_OUTPUT
+
+      - name: Build container image
+        uses: redhat-actions/buildah-build@v2
+        id: build_image
+        with:
+          containerfiles: Containerfile
+          image: ${{ env.IMAGE_NAME }}
+          layers: false
+          oci: true
+          tags: ${{ steps.generate_tags.outputs.tags }}
+
+      - name: Push To GHCR
+        uses: redhat-actions/push-to-registry@v2
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+        with:
+          image: ${{ steps.build_image.outputs.image }}
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+          tags: ${{ steps.generate_tags.outputs.tags }}
+          extra-args: |
+            --disable-content-trust
+
